@@ -153,10 +153,42 @@ py_test(
     srcs_version = "PY2AND3",
     visibility = ["//visibility:public"],
     deps = [
+        ":quantize_aware_activation",
         ":quantize_wrapper",
         # numpy dep1,
         # tensorflow dep1,
         # python/keras tensorflow dep2,
+        "//tensorflow_model_optimization/python/core/quantization/keras/tflite:tflite_quantize_registry",
+    ],
+)
+
+py_library(
+    name = "quantize",
+    srcs = [
+        "quantize.py",
+    ],
+    srcs_version = "PY2AND3",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":quantize_annotate",
+        ":quantize_wrapper",
+        # tensorflow dep1,
+        # python/keras tensorflow dep2,
+        "//tensorflow_model_optimization/python/core/quantization/keras/tflite:tflite_quantize_registry",
+    ],
+)
+
+py_test(
+    name = "quantize_test",
+    srcs = ["quantize_test.py"],
+    python_version = "PY3",
+    srcs_version = "PY2AND3",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":quantize",
+        ":quantize_wrapper",
+        # absl/testing:parameterized dep1,
+        # tensorflow dep1,
         "//tensorflow_model_optimization/python/core/quantization/keras/tflite:tflite_quantize_registry",
     ],
 )
