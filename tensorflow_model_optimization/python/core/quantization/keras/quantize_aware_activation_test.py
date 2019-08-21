@@ -23,6 +23,8 @@ import numpy as np
 from tensorflow.python import keras
 from tensorflow.python.keras import activations
 from tensorflow.python.keras import backend as K
+from tensorflow.python.keras.utils.generic_utils import deserialize_keras_object
+from tensorflow.python.keras.utils.generic_utils import serialize_keras_object
 from tensorflow.python.platform import test
 
 from tensorflow_model_optimization.python.core.quantization.keras import quantize_aware_activation
@@ -51,6 +53,17 @@ class QuantizeAwareQuantizationTest(test.TestCase):
     def compute_output_shape(self, input_shape):
       return input_shape
 
+  def testRaisesError_NotKerasBuiltinActivation(self):
+    layer = self.TestLayer()
+
+    def custom_quantize(x):
+      return x
+
+    with self.assertRaises(ValueError) as cm:
+      QuantizeAwareActivation(custom_quantize, self.quantizer, 0, layer)
+    self.assertEqual(
+        str(cm.exception), QuantizeAwareActivation._CUSTOM_ACTIVATION_ERR_MSG)
+
   def testAppliesQuantizationPostActivation(self):
     layer = self.TestLayer()
     layer.activation = QuantizeAwareActivation(
@@ -64,8 +77,8 @@ class QuantizeAwareQuantizationTest(test.TestCase):
     # 256 buckets.
     # Derived using `tf.fake_quant_with_min_max_vars`
     expected_activation = np.array(
-        [0.0, 0.0, 0.0, 0.04705906, 0.09411764, 3.011765, 5.9764705]
-    ).reshape(7, 1)
+        [0.0, 0.0, 0.0, 0.04705906, 0.09411764, 3.011765,
+         5.9764705]).reshape(7, 1)
 
     self.assertAllClose(expected_activation, model.predict(x))
 
@@ -87,6 +100,25 @@ class QuantizeAwareQuantizationTest(test.TestCase):
     expected_activation = np.array([[0.28235292, 0.70588255]])
 
     self.assertAllClose(expected_activation, model.predict(x))
+
+  def testSerializationReturnsWrappedActivation_BuiltInActivation(self):
+    activation = activations.get('tanh')
+    quantize_activation = QuantizeAwareActivation(
+        activation, self.quantizer, 0, self.TestLayer())
+
+    expected_config = {
+        'class_name': 'QuantizeAwareActivation',
+        'config': {'activation': 'tanh'}
+    }
+    serialized_quantize_activation = serialize_keras_object(quantize_activation)
+
+    self.assertEqual(expected_config, serialized_quantize_activation)
+
+    deserialized_activation = deserialize_keras_object(
+        serialized_quantize_activation,
+        custom_objects={'QuantizeAwareActivation': QuantizeAwareActivation})
+
+    self.assertEqual(activation, deserialized_activation)
 
 
 if __name__ == '__main__':
