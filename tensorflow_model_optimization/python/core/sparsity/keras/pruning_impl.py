@@ -53,12 +53,12 @@ class Pruning(object):
     self._pruning_schedule = pruning_schedule
     self._block_size = list(block_size)
     self._block_pooling_type = block_pooling_type
-    self._validate_block()
+    #self._validate_block()
 
     # Training step
     self._step_fn = training_step_fn
 
-    self._validate_block()
+    #self._validate_block()
 
   def _validate_block(self):
     if self._block_size != [1, 1]:
@@ -105,6 +105,54 @@ class Pruning(object):
           dtypes.float32)
     return current_threshold, new_mask
 
+
+  def _update_block_channel_mask(self, weights):
+      """
+      Performs channel wise masking of the weights (function below doesn't work).
+      Args:
+        weights: The weight tensor that needs to be masked.
+        
+      Returns:
+        new_threshold: The new value of the threshold based on weights, and sparsity at the current global_step
+        new_mask: A numpy array of the same size and shape as the weights containing 0 or 1 to indicate which of the values in weights falls below
+        the threshold
+
+      Raises:
+        ValueError: if block pooling function is not AVG or MAX
+
+      """
+      # The weights should be of shape (1, 1, j, k), representing the shape of a pointwise convolutional layer.
+
+      sparsity = self._pruning_schedule(self._step_fn())[1]
+      with ops.name_scope('pruning_ops'):
+        abs_weights = math_ops.abs(weights) 
+
+        k = math_ops.cast(sparsity * math_ops.cast(abs_weights.shape[-1], dtypes.float32), dtypes.int32)
+            
+        # Tranpose to have rows as values per output channel tensor
+        squeezed_weights = tf.transpose(array_ops.squeeze(abs_weights))
+        
+        # Calculating the sum per output channel 
+        channel_sums = tf.sort(tf.reduce_sum(squeezed_weights, 1))
+        
+        # Grab the smallest K magnitude channels
+        min_sums = channel_sums[:k]
+                  
+        current_threshold = array_ops.gather(min_sums, k - 1)
+    
+        # If any row sums matches the min K sums, set it to zero (prune it), otherwise set it to 1
+        new_mask = tf.map_fn(lambda x: tf.cond(tf.reduce_any(tf.equal(tf.reduce_sum(x), min_sums)), lambda: tf.zeros_like(x),  lambda: tf.ones_like(x)), squeezed_weights) 
+    
+        # Tranpose back to I x O and reshape into 1x1xIxO
+        new_mask = tf.transpose(new_mask)
+        new_mask = tf.reshape(new_mask, abs_weights.shape)
+        tf.print(new_mask)
+        
+      return current_threshold, new_mask
+
+
+
+
   def _maybe_update_block_mask(self, weights):
     """Performs block-granular masking of the weights.
 
@@ -124,33 +172,36 @@ class Pruning(object):
     Raises:
       ValueError: if block pooling function is not AVG or MAX
     """
-    if self._block_size == [1, 1]:
-      return self._update_mask(weights)
-
-    # TODO(pulkitb): Check if squeeze operations should now be removed since
-    # we are only accepting 2-D weights.
-
-    squeezed_weights = array_ops.squeeze(weights)
-    abs_weights = math_ops.abs(squeezed_weights)
-    pooled_weights = pruning_utils.factorized_pool(
-        abs_weights,
-        window_shape=self._block_size,
-        pooling_type=self._block_pooling_type,
-        strides=self._block_size,
-        padding='SAME')
-
-    if pooled_weights.get_shape().ndims != 2:
-      pooled_weights = array_ops.squeeze(pooled_weights)
-
-    new_threshold, new_mask = self._update_mask(pooled_weights)
-
-    updated_mask = pruning_utils.expand_tensor(new_mask, self._block_size)
-    sliced_mask = array_ops.slice(
-        updated_mask, [0, 0],
-        [squeezed_weights.get_shape()[0],
-         squeezed_weights.get_shape()[1]])
-    return new_threshold, array_ops.reshape(sliced_mask,
-                                            array_ops.shape(weights))
+    return self._update_block_channel_mask(weights)
+#    if self._block_size == [1, 1]:
+#      return self._update_mask(weights)
+#
+#    # TODO(pulkitb): Check if squeeze operations should now be removed since
+#    # we are only accepting 2-D weights.
+#
+#    squeezed_weights = array_ops.squeeze(weights)
+#    abs_weights = math_ops.abs(squeezed_weights)
+#
+#    pooled_weights = pruning_utils.factorized_pool(
+#        abs_weights,
+#        window_shape=self._block_size,
+#        pooling_type=self._block_pooling_type,
+#        strides=self._block_size,
+#        padding='SAME')    
+#
+#    if pooled_weights.get_shape().ndims != 2:
+#      pooled_weights = array_ops.squeeze(pooled_weights)
+#
+#    new_threshold, new_mask = self._update_mask(pooled_weights)
+#
+#    updated_mask = pruning_utils.expand_tensor(new_mask, self._block_size)
+#    
+#    sliced_mask = array_ops.slice(
+#        updated_mask, [0, 0],
+#        [squeezed_weights.get_shape()[0],
+#         squeezed_weights.get_shape()[1]])
+#
+#    return new_threshold, array_ops.reshape(sliced_mask,array_ops.shape(weights))
 
   def _get_weight_assign_ops(self):
     """Gather the assign ops for assigning weights<=weights*mask."""

@@ -79,8 +79,8 @@ def expand_tensor(tensor, block_size):
     ValueError: if tensor is not rank-2 or block_size is does not have 2
     elements.
   """
-  if tensor.get_shape().ndims != 2:
-    raise ValueError('Input tensor must be rank 2')
+  #if tensor.get_shape().ndims != 2:
+  #  raise ValueError('Input tensor must be rank 2')
 
   if len(block_size) != 2:
     raise ValueError('block_size must have 2 elements')
